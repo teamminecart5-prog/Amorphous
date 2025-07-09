@@ -9,9 +9,6 @@ import threading
 
 from time import sleep
 import os, os.path
-from keep_alive import keep_alive
-
-keep_alive()
 
 
 def update_watcher():
@@ -102,7 +99,7 @@ def update_convo(conversation, guild_id):
 
 async def check_permissions(message):
     # Allow user with specific ID to bypass permission checks
-    if message.author.id == 1069624150492205157:
+    if message.author.id == ur id ig here:
         return True
     if not (message.author.guild_permissions.manage_guild or message.author.guild_permissions.administrator):
         await message.channel.send("You need 'Manage Server' or 'Administrator' permissions to use this command.")
