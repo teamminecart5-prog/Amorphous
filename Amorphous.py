@@ -48,7 +48,8 @@ knowledge_db = []
 #             knowledge_db.append([file,w.read()])
 model = 'gemini-2.0-flash'
 model1= 'gemini-2.5-flash'
-model2= "gemini-2.5-pro'
+model2= 'gemini-2.5-pro'
+user = YOUR USER ID HERE!!!
 
 gemini_client = genai.Client(
     api_key=gemini_api_key,
@@ -99,7 +100,7 @@ def update_convo(conversation, guild_id):
 
 async def check_permissions(message):
     # Allow user with specific ID to bypass permission checks
-    if message.author.id == ur id ig here:
+    if message.author.id == user:
         return True
     if not (message.author.guild_permissions.manage_guild or message.author.guild_permissions.administrator):
         await message.channel.send("You need 'Manage Server' or 'Administrator' permissions to use this command.")
