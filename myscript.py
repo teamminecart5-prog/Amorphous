@@ -43,6 +43,7 @@ prefix = amorphous_config["prefix"]
 gemini_api_key = amorphous_config["api_key"]
 token = amorphous_config["token"]
 shape_name = amorphous_config["shape-name"]
+user_id = os.environ.get("User")
 knowledge_db = []
 # if amorphous_config["make_folder"]=="True":
 #     if not os.path.exists(shape_name):
@@ -105,7 +106,7 @@ def update_convo(conversation, guild_id):
 
 async def check_permissions(message):
     # Allow user with specific ID to bypass permission checks
-    if message.author.id == 1069624150492205157:
+    if message.author.id == user_id:
         return True
     if not (message.author.guild_permissions.manage_guild or message.author.guild_permissions.administrator):
         await message.channel.send("You need 'Manage Server' or 'Administrator' permissions to use this command.")
