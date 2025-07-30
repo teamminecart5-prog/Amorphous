@@ -9,3 +9,13 @@ u need some environmental (.env) things (google if u dont know whats that)
 "Name" do i seriously need to explain this XD (name of the bot if u dont get what should be there)
 "User" just put ur user id here. still fixing this but it will basically let u bypass the command restrictions (basically let you use any commands the bot has (activate,wack,deactivate,allow etc) if u dont have admin)
 also run pip install -r requirements.txt or u will get big scary ModuleNotFoundError
+more detailed explanation if ur dum (dont take it seriously its a joke):
+create a file named .env, type Discord=(your discord bot's token which you can get in discord dev portal)
+Gemini=(your gemini api key which u get thru https://aistudio.google.com/apikey)
+Id=(your bot's prefix)
+Rp=(the prompt for the bot)
+User=(your user id)
+Name=(name that the bot will have in rp)
+also pls know that the second ur internet becomes bad, it might just stop working. also if u run this on ur local computer and then turn it off, the bot will die (turn off)
+so uh keep ur computer on 24/7 or get a server XD
+bye have a nice day ig! :)
