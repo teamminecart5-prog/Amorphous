@@ -8,6 +8,9 @@ import requests
 import random
 import re
 import threading
+from datetime import datetime, timedelta
+import discord.utils
+import json
 
 from time import sleep
 import os, os.path
@@ -43,15 +46,42 @@ prefix = amorphous_config["prefix"]
 gemini_api_key = amorphous_config["api_key"]
 token = amorphous_config["token"]
 shape_name = amorphous_config["shape-name"]
-user_id = os.environ.get("User")
 knowledge_db = []
-# if amorphous_config["make_folder"]=="True":
-#     if not os.path.exists(shape_name):
-#         os.mkdir(shape_name)
-#         print("Knowledge created")
-#     for file in os.listdir(f"./{shape_name}/"):
-#         with open(file,"r") as w:
-#             knowledge_db.append([file,w.read()])
+user = os.environ.get("User")
+
+# Trusted users system - Add your trusted user IDs here
+TRUSTED_USERS = [user]  # Add more IDs as needed
+TRUSTED_USERS_FILE = "trusted_users.json"
+
+def load_trusted_users():
+    """Load trusted users from file"""
+    global TRUSTED_USERS
+    try:
+        if os.path.exists(TRUSTED_USERS_FILE):
+            with open(TRUSTED_USERS_FILE, 'r') as f:
+                TRUSTED_USERS = json.load(f)
+    except Exception as e:
+        print(f"Error loading trusted users: {e}")
+
+def save_trusted_users():
+    """Save trusted users to file"""
+    try:
+        with open(TRUSTED_USERS_FILE, 'w') as f:
+            json.dump(TRUSTED_USERS, f)
+    except Exception as e:
+        print(f"Error saving trusted users: {e}")
+
+def is_trusted_user(user_id):
+    """Check if user is trusted"""
+    return user_id in TRUSTED_USERS
+
+def can_moderate(user_id, guild_permissions):
+    """Check if user can moderate (trusted or has permissions)"""
+    return is_trusted_user(user_id) or guild_permissions.kick_members or guild_permissions.ban_members or guild_permissions.moderate_members
+
+# Load trusted users on startup
+load_trusted_users()
+
 model = 'gemini-2.0-flash'
 model1= 'gemini-2.5-flash'
 model2= 'gemini-2.0-flash-lite'
@@ -106,13 +136,39 @@ def update_convo(conversation, guild_id):
 
 async def check_permissions(message):
     # Allow user with specific ID to bypass permission checks
-    if message.author.id == user_id:
+    if message.author.id == user:
         return True
     if not (message.author.guild_permissions.manage_guild or message.author.guild_permissions.administrator):
         await message.channel.send("You need 'Manage Server' or 'Administrator' permissions to use this command.")
         return False
     return True
 
+async def check_moderation_permissions(message):
+    """Check if user can use moderation commands"""
+    if is_trusted_user(message.author.id):
+        return True
+    if message.author.guild_permissions.kick_members or message.author.guild_permissions.ban_members or message.author.guild_permissions.moderate_members:
+        return True
+    await message.channel.send("You need mod perms to use this command")
+    return False
+
+def parse_time_duration(duration_str):
+    """Parse duration string like '1h', '30m', '1d' into timedelta"""
+    if not duration_str:
+        return None
+    
+    duration_str = duration_str.lower()
+    if duration_str[-1] == 's':
+        return timedelta(seconds=int(duration_str[:-1]))
+    elif duration_str[-1] == 'm':
+        return timedelta(minutes=int(duration_str[:-1]))
+    elif duration_str[-1] == 'h':
+        return timedelta(hours=int(duration_str[:-1]))
+    elif duration_str[-1] == 'd':
+        return timedelta(days=int(duration_str[:-1]))
+    else:
+        # Default to minutes if no unit specified
+        return timedelta(minutes=int(duration_str))
 
 def gen(model, prompt, streaming=False):
     if streaming:
@@ -182,46 +238,6 @@ async def replace_mentions_with_usernames(content: str, message: discord.Message
         nickname_mention_string = f"<@!{user.id}>"
         processed_content = processed_content.replace(nickname_mention_string, replacement_string)
 
-    # --- Alternative using Regex (more robust if mentions might be malformed) ---
-    # If you suspect mentions might not be perfectly captured by message.mentions
-    # or you need to handle cases not automatically parsed by discord.py,
-    # you could use regex, but it requires fetching members which is slower.
-
-    # pattern = re.compile(r'<@!?(\d+)>') # Matches <@USER_ID> and <@!USER_ID>
-    # matches = pattern.finditer(content)
-    # processed_content = content # Start fresh if using regex method
-    # replacements = {} # Store replacements to avoid modifying the string while iterating
-
-    # for match in matches:
-    #     full_mention = match.group(0)
-    #     user_id = int(match.group(1))
-
-    #     # Try to find the user in message.mentions first (efficient)
-    #     mentioned_user = discord.utils.get(message.mentions, id=user_id)
-
-    #     # If not in mentions, try fetching from the guild (less efficient)
-    #     if not mentioned_user and message.guild:
-    #         try:
-    #             # Note: Fetching might require Member Intents enabled for your bot
-    #             mentioned_user = message.guild.get_member(user_id)
-    #             # If get_member returns None and you have intents, you might need:
-    #             # mentioned_user = await message.guild.fetch_member(user_id)
-    #         except discord.NotFound:
-    #             mentioned_user = None # User not found in the guild
-    #         except discord.Forbidden:
-    #             mentioned_user = None # Bot lacks permissions
-
-    #     if mentioned_user:
-    #         replacements[full_mention] = f"@{mentioned_user.display_name}"
-    #     else:
-    #         # Optional: Handle cases where the user ID is invalid or user not found
-    #         replacements[full_mention] = f"@UnknownUser({user_id})" # Or keep the original mention
-
-    # # Apply replacements
-    # for original, replacement in replacements.items():
-    #      processed_content = processed_content.replace(original, replacement)
-    # --- End of Regex Alternative ---
-
     return processed_content
 
 
@@ -239,6 +255,15 @@ async def find_member(message, member_identifier):
             await message.channel.send("Invalid member mention format.")
             return None
     else:
+        # Try to convert to int (user ID)
+        try:
+            member_id = int(member_identifier)
+            member = message.guild.get_member(member_id)
+            if member:
+                return member
+        except ValueError:
+            pass
+        
         # Attempt to find by exact match first
         for m in message.guild.members:
             # Check nickname exact match
@@ -266,8 +291,7 @@ async def find_member(message, member_identifier):
                         break
 
     if not member:
-        # await message.channel.send(f"Member not found: '{member_identifier}'")
-        return "@" + member_identifier
+        return None
 
     return member
 
@@ -351,6 +375,8 @@ async def on_message(message):
     if message.author == client.user:
         return
     ran_command = False
+    
+    # Help command
     if message.content.startswith(f'{prefix} help'):
         help_text = (
             f"**{shape_name} Bot Commands:**\n"
@@ -361,12 +387,110 @@ async def on_message(message):
             f"`{prefix} toggle` - Toggle bot ignoring other bots\n"
             f"`{prefix} allow` - Allow bot to respond in channel\n"
             f"`{prefix} reset` - Reset bot to default state\n"
-            f"`{prefix} search (the thing you want to search)` - Makes the bot search\n"
+            f"`{prefix} search (the thing you want to search)` - Makes the bot search\n\n"
+            "**Moderation Commands:**\n"
+            f"`{prefix} ban @user [reason]` - Ban a user\n"
+            f"`{prefix} kick @user [reason]` - Kick a user\n"
+            f"`{prefix} timeout @user <duration> [reason]` - Timeout a user (e.g., 10m, 1h, 1d)\n"
             "Mention the bot or reply to its message to chat.\n\n"
-            "Powered by Amorphous Discord Engine and Gemini 2.0 Flash but actually powered by Python"
+            "Powered by Amorphous Discord Engine and Gemini 2.0 Flash"
         )
         await message.channel.send(help_text)
         ran_command = True
+    
+    # Ban command
+    if message.content.startswith(f"{prefix} ban "):
+        if not await check_moderation_permissions(message):
+            ran_command = True
+        else:
+            args = message.content[len(f"{prefix} ban "):].split(" ", 1)
+            if len(args) < 1:
+                await message.channel.send("Usage: `ban @user [reason]`")
+                ran_command = True
+            else:
+                target_member = await find_member(message, args[0])
+                if not target_member:
+                    await message.channel.send("User not found")
+                    ran_command = True
+                elif is_trusted_user(target_member.id):
+                    await message.channel.send("blud u aint banning da owner")
+                    ran_command = True
+                else:
+                    reason = args[1] if len(args) > 1 else f"Banned by {message.author.display_name}"
+                    try:
+                        await target_member.ban(reason=reason)
+                        await message.channel.send(f"Banned **{target_member.display_name}** | Reason: {reason}")
+                    except discord.Forbidden:
+                        await message.channel.send("I don't have permission to ban this user")
+                    except Exception as e:
+                        await message.channel.send("Error banning user")
+                    ran_command = True
+
+    # Kick command
+    if message.content.startswith(f"{prefix} kick "):
+        if not await check_moderation_permissions(message):
+            ran_command = True
+        else:
+            args = message.content[len(f"{prefix} kick "):].split(" ", 1)
+            if len(args) < 1:
+                await message.channel.send("Usage: `kick @user [reason]`")
+                ran_command = True
+            else:
+                target_member = await find_member(message, args[0])
+                if not target_member:
+                    await message.channel.send("User not found!")
+                    ran_command = True
+                elif is_trusted_user(target_member.id):
+                    await message.channel.send("blud u aint kicking da owner")
+                    ran_command = True
+                else:
+                    reason = args[1] if len(args) > 1 else f"Kicked by {message.author.display_name}"
+                    try:
+                        await target_member.kick(reason=reason)
+                        await message.channel.send(f"Kicked **{target_member.display_name}** | Reason: {reason}")
+                    except discord.Forbidden:
+                        await message.channel.send("I don't have permission to kick this user!")
+                    except Exception as e:
+                        await message.channel.send("Error kicking user")
+                    ran_command = True
+
+    # Timeout command
+    if message.content.startswith(f"{prefix} timeout "):
+        if not await check_moderation_permissions(message):
+            ran_command = True
+        else:
+            args = message.content[len(f"{prefix} timeout "):].split(" ", 2)
+            if len(args) < 2:
+                await message.channel.send("Usage: `timeout @user <duration> [reason]`\nDuration examples: 10m, 1h, 2d")
+                ran_command = True
+            else:
+                target_member = await find_member(message, args[0])
+                if not target_member:
+                    await message.channel.send("User not found!")
+                    ran_command = True
+                elif is_trusted_user(target_member.id):
+                    await message.channel.send("blud u aint timiming out da owner")
+                    ran_command = True
+                else:
+                    try:
+                        duration = parse_time_duration(args[1])
+                        if not duration:
+                            await message.channel.send("Invalid duration format. Use: 10m, 1h, 2d, etc.")
+                            ran_command = True
+                        else:
+                            reason = args[2] if len(args) > 2 else f"Timed out by {message.author.display_name}"
+                            until = discord.utils.utcnow() + duration
+                            await target_member.timeout(until, reason=reason)
+                            await message.channel.send(f"Timed out **{target_member.display_name}** for {args[1]} | Reason: {reason}")
+                    except discord.Forbidden:
+                        await message.channel.send("I don't have permission to timeout this user!")
+                    except Exception as e:
+                        await message.channel.send("Error timing out user")
+                    ran_command = True
+
+
+
+    # Search command
     if message.content.startswith(f"{prefix} search "):
         query = message.content[len(f"{prefix} search "):]
         try:
@@ -408,40 +532,45 @@ async def on_message(message):
         await safesend(message.channel.send, answer)
         ran_command = True
         
-
-
-                
- 
+    # Allow command        
     if message.content.startswith(f'{prefix} allow'):
         await message.channel.send("Allowed.")
-        ignored_channels.remove(message.channel.id)
+        if message.channel.id in ignored_channels:
+            ignored_channels.remove(message.channel.id)
         ran_command = True
+        
+    # Activate command
     if message.content.startswith(f'{prefix} activate'):
         activated_channels.append(message.channel.id)
         await message.channel.send('(system response)\n>(activated)')
         ran_command = True
+        
+    # Deactivate command
     if message.content.startswith(f'{prefix} deactivate'):
         if message.channel.id in activated_channels:
             activated_channels.remove(message.channel.id)
             await message.channel.send('(system response)\n> Deactivated.')
         else:
-            message.channel.send("test")
-            if check_permissions(message.author):
-                if not message.channel.id in ignored_channels:
+            if await check_permissions(message):
+                if message.channel.id not in ignored_channels:
                     await message.channel.send('(system response)\nAdded to exclusion.')
                     ignored_channels.append(message.channel.id)
             else:
                 await message.channel.send('(system response)\nHELL NAW; ')
         ran_command = True
 
+    # Toggle command
     if message.content.startswith(f"{prefix} toggle"):
         await message.channel.send("(system response)\n Bro this is dangerous af u sure? Activated prepare for chaOS")
         toggle = not (toggle)
         ran_command = True
+        
+    # Wack command
     if message.content.startswith(f'{prefix} wack'):
         conversation.clear()
-        await message.channel.send('(system response)\n> Conversation history wiped! 💀')
+        await message.channel.send('(system response)\n> Conversation history wiped! рџ’Ђ')
         ran_command = True
+        
     if len(conversation) > 600:
         conversation.remove(conversation[0])
     update_convo(conversation, guild_id)
@@ -469,7 +598,7 @@ async def on_message(message):
         should_respond = True
     else:
         # Respond if pinged or random chance (1 in 5)
-        if client.user in message.mentions or random.randint(1, 100000) == 1:
+        if client.user in message.mentions or random.randint(1, 5) == 1:
             should_respond = True
     if message.channel.id in ignored_channels:
         should_respond = False
@@ -481,17 +610,6 @@ async def on_message(message):
                 l = gen(model, rp + str(
                     conversation) + f";You username here is {client.user}; Please generate a response based on the text above!  ").text.removeprefix(
                     str(client.user)).removeprefix(":")
-                # l = gen(model, str(knowledge_db)+rp+str(conversation)+f"; Write a response to the conversation above following the prompt! You username here is {client.user} Only write the message part of the message, do not narrate other; ",streaming=True)
-                # msg = await message.channel.send("(...)")
-                # full_msg = ""
-                # async with message.channel.typing():
-                #     for chunk in l:
-                #         if len(full_msg)>1500:
-                #             msg = await message.channel.send("(...)")
-                #             full_msg = ""
-                #         full_msg+=chunk.text
-                #         await msg.edit(content=full_msg)
-                # await safesend(message.channel.send, l)
         except Exception as e:
             try:
                 l = ("(API CREDITS RAN OUT; Using free model; Please wait.) \n") + str(e)
