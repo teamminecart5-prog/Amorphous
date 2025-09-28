@@ -16,9 +16,9 @@ import unicodedata # Added for Unicode normalization to enhance security
 
 from time import sleep
 import os, os.path
-from keep_alive import keep_alive
+#from keep_alive import keep_alive
 
-keep_alive()
+#keep_alive() removed it cuz yes
 
 
 def update_watcher():
